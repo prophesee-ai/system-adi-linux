@@ -8,6 +8,7 @@
 #include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
+#include <linux/property.h>
 #include <linux/gpio/driver.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinmux.h>
@@ -28,6 +29,43 @@
 
 #define MAX96717_REG6				0x6
 #define MAX96717_REG6_RCLKEN			BIT(5)
+
+#define MAX96717_I2C_0                          0x40
+#define MAX96717_I2C_0_SLV_SH                   GENMASK(5, 4)
+#define MAX96717_I2C_0_SLV_TO                   GENMASK(2, 0)
+
+#define MAX96717_I2C_0_SLV_SH_1MBPS             0b00
+#define MAX96717_I2C_0_SLV_SH_400KBPS           0b01
+#define MAX96717_I2C_0_SLV_SH_100KBPS           0b10
+
+#define MAX96717_I2C_0_SLV_TO_32MS              0b110
+#define MAX96717_I2C_0_SLV_TO_16MS              0b101
+#define MAX96717_I2C_0_SLV_TO_8MS               0b100
+#define MAX96717_I2C_0_SLV_TO_4MS               0b011
+#define MAX96717_I2C_0_SLV_TO_2MS               0b010
+#define MAX96717_I2C_0_SLV_TO_1MS               0b001
+#define MAX96717_I2C_0_SLV_TO_16US              0b000
+
+#define MAX96717_I2C_1                          0x41
+#define MAX96717_I2C_1_MST_BT                   GENMASK(6, 4)
+#define MAX96717_I2C_1_MST_TO                   GENMASK(2, 0)
+
+#define MAX96717_I2C_1_MST_BT_980KBPS           0b111
+#define MAX96717_I2C_1_MST_BT_625KBPS           0b110
+#define MAX96717_I2C_1_MST_BT_397KBPS           0b101
+#define MAX96717_I2C_1_MST_BT_203KBPS           0b100
+#define MAX96717_I2C_1_MST_BT_123KBPS           0b011
+#define MAX96717_I2C_1_MST_BT_99KBPS            0b010
+#define MAX96717_I2C_1_MST_BT_33KBPS            0b001
+#define MAX96717_I2C_1_MST_BT_9KBPS             0b000
+
+#define MAX96717_I2C_1_MST_TO_32MS              0b110
+#define MAX96717_I2C_1_MST_TO_16MS              0b101
+#define MAX96717_I2C_1_MST_TO_8MS               0b100
+#define MAX96717_I2C_1_MST_TO_4MS               0b011
+#define MAX96717_I2C_1_MST_TO_2MS               0b010
+#define MAX96717_I2C_1_MST_TO_1MS               0b001
+#define MAX96717_I2C_1_MST_TO_16US              0b000
 
 #define MAX96717_I2C_2(x)			(0x42 + (x) * 0x2)
 #define MAX96717_I2C_2_SRC			GENMASK(7, 1)
@@ -217,6 +255,7 @@ struct max96717_priv {
 
 	struct clk_hw clk_hw;
 	u8 pll_predef_index;
+	u32 remote_i2c_rate;
 };
 
 struct max96717_chip_info {
@@ -861,6 +900,77 @@ static int max96717_set_pipe_vcs(struct max_ser *ser,
 	return regmap_write(priv->regmap, MAX96717_FRONTTOP_2(index),
 			      (vcs >> 8) & 0xff);
 }
+
+static int max96717_i2c_rate_to_hw(u32 rate_hz, u32 *hw)
+{
+	switch (rate_hz) {
+	case 100000:
+		*hw = MAX96717_I2C_0_SLV_SH_100KBPS;
+		return 0;
+	case 400000:
+		*hw = MAX96717_I2C_0_SLV_SH_400KBPS;
+		return 0;
+	case 1000000:
+		*hw = MAX96717_I2C_0_SLV_SH_1MBPS;
+		return 0;
+	default:
+		return -EINVAL;
+	}
+}
+
+static int max96717_set_i2c_config(struct max96717_priv *priv, u32 rate_hz)
+{
+	u32 hw;
+	int ret;
+
+	ret = max96717_i2c_rate_to_hw(rate_hz, &hw);
+	if (ret) {
+		dev_err(priv->dev, "unsupported downstream i2c rate: %u\n", rate_hz);
+		return ret;
+	}
+
+	ret = regmap_update_bits(priv->regmap, MAX96717_I2C_0, MAX96717_I2C_0_SLV_SH,
+				 FIELD_PREP(MAX96717_I2C_0_SLV_SH, hw));
+
+	ret = regmap_update_bits(priv->regmap, MAX96717_I2C_0, MAX96717_I2C_0_SLV_TO,
+				 FIELD_PREP(MAX96717_I2C_0_SLV_TO, MAX96717_I2C_0_SLV_TO_16MS));
+
+	ret = regmap_update_bits(priv->regmap, MAX96717_I2C_1, MAX96717_I2C_1_MST_BT,
+				 FIELD_PREP(MAX96717_I2C_1_MST_BT, MAX96717_I2C_1_MST_BT_99KBPS));
+
+	ret = regmap_update_bits(priv->regmap, MAX96717_I2C_1, MAX96717_I2C_1_MST_TO,
+				 FIELD_PREP(MAX96717_I2C_1_MST_TO, MAX96717_I2C_1_MST_TO_16MS));
+
+	if (ret)
+		return ret;
+
+	dev_info(priv->dev, "downstream i2c rate set to %u Hz\n", rate_hz);
+	return 0;
+}
+
+static int max96717_get_i2c_config(struct max96717_priv *priv)
+{
+        unsigned int val;
+        int ret;
+
+        ret = regmap_read(priv->regmap, MAX96717_I2C_0, &val);
+        if (ret)
+                return ret;
+
+        dev_info(priv->dev, "Serializer I2C Config\n");
+        dev_info(priv->dev, "\tslave setup-hold timings: %lu\n", field_get(MAX96717_I2C_0_SLV_SH, val));
+        dev_info(priv->dev, "\tslave timeout: %lu\n", field_get(MAX96717_I2C_0_SLV_TO, val));
+
+        ret = regmap_read(priv->regmap, MAX96717_I2C_1, &val);
+        if (ret)
+                return ret;
+
+        dev_info(priv->dev, "\tmaster rate: %lu\n", field_get(MAX96717_I2C_1_MST_BT, val));
+        dev_info(priv->dev, "\tmaster timeout: %lu\n", field_get(MAX96717_I2C_1_MST_TO, val));
+
+        return 0;
+}
+
 
 static int max96717_log_status(struct max_ser *ser)
 {
@@ -1586,6 +1696,9 @@ static int max96717_probe(struct i2c_client *client)
 	struct max_ser_ops *ops;
 	int ret;
 
+	dev_info(dev, "Probing Serializer\n");
+
+
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
@@ -1609,6 +1722,19 @@ static int max96717_probe(struct i2c_client *client)
 		return PTR_ERR(priv->regmap);
 
 	*ops = max96717_ops;
+
+	/* Parse DT property; default standard mode 100kHz */
+	priv->remote_i2c_rate = 100000;
+	device_property_read_u32(dev, "clock-frequency",
+			 &priv->remote_i2c_rate);
+
+	ret = max96717_set_i2c_config(priv, priv->remote_i2c_rate);
+	if (ret)
+		return ret;
+
+	ret = max96717_get_i2c_config(priv);
+	if (ret)
+		return ret;
 
 	if (priv->info->modes & BIT(MAX_SERDES_GMSL_TUNNEL_MODE))
 		ops->set_tunnel_enable = max96717_set_tunnel_enable;

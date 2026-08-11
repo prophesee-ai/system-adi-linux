@@ -1627,6 +1627,8 @@ static int max_des_i2c_atr_init(struct max_des_priv *priv)
 	unsigned int mask = 0;
 	unsigned int i;
 	int ret;
+	
+	dev_info(priv->dev, "Deserializer I2C atr init\n");
 
 	if (!i2c_check_functionality(priv->client->adapter,
 				     I2C_FUNC_SMBUS_WRITE_BYTE_DATA))

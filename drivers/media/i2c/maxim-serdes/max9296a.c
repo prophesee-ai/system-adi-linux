@@ -51,6 +51,49 @@
 #define MAX9296A_IO_CHK0_PIN_DRV_EN_0_75MHZ	0b01
 #define MAX9296A_IO_CHK0_PIN_DRV_EN_0_USE_PIPE	0b10
 
+#define MAX96716A_I2C_0                         0x40
+#define MAX96716A_I2C_0_SLV_SH                  GENMASK(5, 4)
+#define MAX96716A_I2C_0_SLV_TO                  GENMASK(2, 0)
+
+#define MAX96716A_I2C_0_SLV_SH_1MBPS            0b00
+#define MAX96716A_I2C_0_SLV_SH_400KBPS          0b01
+#define MAX96716A_I2C_0_SLV_SH_100KBPS          0b10
+
+#define MAX96716A_I2C_0_SLV_TO_32MS             0b110
+#define MAX96716A_I2C_0_SLV_TO_16MS             0b101
+#define MAX96716A_I2C_0_SLV_TO_8MS              0b100
+#define MAX96716A_I2C_0_SLV_TO_4MS              0b011
+#define MAX96716A_I2C_0_SLV_TO_2MS              0b010
+#define MAX96716A_I2C_0_SLV_TO_1MS              0b001
+#define MAX96716A_I2C_0_SLV_TO_16US             0b000
+
+#define MAX96716A_I2C_1                         0x41
+#define MAX96716A_I2C_1_MST_BT                  GENMASK(6, 4)
+#define MAX96716A_I2C_1_MST_TO                  GENMASK(2, 0)
+
+#define MAX96716A_I2C_1_MST_BT_980KBPS          0b111
+#define MAX96716A_I2C_1_MST_BT_625KBPS          0b110
+#define MAX96716A_I2C_1_MST_BT_397KBPS          0b101
+#define MAX96716A_I2C_1_MST_BT_203KBPS          0b100
+#define MAX96716A_I2C_1_MST_BT_123KBPS          0b011
+#define MAX96716A_I2C_1_MST_BT_99KBPS           0b010
+#define MAX96716A_I2C_1_MST_BT_33KBPS           0b001
+#define MAX96716A_I2C_1_MST_BT_9KBPS            0b000
+
+#define MAX96716A_I2C_1_MST_TO_32MS             0b110
+#define MAX96716A_I2C_1_MST_TO_16MS             0b101
+#define MAX96716A_I2C_1_MST_TO_8MS              0b100
+#define MAX96716A_I2C_1_MST_TO_4MS              0b011
+#define MAX96716A_I2C_1_MST_TO_2MS              0b010
+#define MAX96716A_I2C_1_MST_TO_1MS              0b001
+#define MAX96716A_I2C_1_MST_TO_16US             0b000
+
+#define MAX96716A_I2C_2(x)                      (0x42 + (x) * 0x2)
+#define MAX96716A_I2C_2_SRC                     GENMASK(7, 1)
+
+#define MAX96716A_I2C_3(x)                      (0x43 + (x) * 0x2)
+#define MAX96716A_I2C_3_DST                     GENMASK(7, 1)
+
 #define MAX9296A_RX50(p)			(0x50 + (p))
 #define MAX9296A_RX50_STR_SEL			GENMASK(1, 0)
 
@@ -251,6 +294,9 @@ static int max9296a_wait_for_device(struct max9296a_priv *priv)
 static int max9296a_reset(struct max9296a_priv *priv)
 {
 	int ret;
+
+	dev_info(priv->dev, "Deserializer reset\n");
+
 
 	ret = max9296a_wait_for_device(priv);
 	if (ret)
@@ -1065,6 +1111,42 @@ static const struct max_des_ops max9296a_common_ops = {
 	.set_link_version = max9296a_set_link_version,
 };
 
+static int max9296a_set_i2c_config(struct max9296a_priv *priv)
+{
+	int ret;
+	
+	// I2C Config
+	ret = regmap_update_bits(priv->regmap, MAX96716A_I2C_1, MAX96716A_I2C_1_MST_BT,
+				 FIELD_PREP(MAX96716A_I2C_1_MST_BT, 2));
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int max9296a_get_i2c_config(struct max9296a_priv *priv)
+{
+	unsigned int val;
+	int ret;
+	
+	ret = regmap_read(priv->regmap, MAX96716A_I2C_0, &val);
+	if (ret)
+		return ret;
+
+	dev_info(priv->dev, "Deserializer I2C Config\n");
+	dev_info(priv->dev, "\tslave setup-hold timings: %lu\n", field_get(MAX96716A_I2C_0_SLV_SH, val));
+	dev_info(priv->dev, "\tslave timeout: %lu\n", field_get(MAX96716A_I2C_0_SLV_TO, val));
+
+	ret = regmap_read(priv->regmap, MAX96716A_I2C_1, &val);
+	if (ret)
+		return ret;
+
+	dev_info(priv->dev, "\tmaster rate: %lu\n", field_get(MAX96716A_I2C_1_MST_BT, val));
+	dev_info(priv->dev, "\tmaster timeout: %lu\n", field_get(MAX96716A_I2C_1_MST_TO, val));
+
+	return 0;
+}
+
 static int max9296a_probe(struct i2c_client *client)
 {
 	struct regmap_config i2c_regmap = max9296a_i2c_regmap;
@@ -1072,6 +1154,9 @@ static int max9296a_probe(struct i2c_client *client)
 	struct max9296a_priv *priv;
 	struct max_des_ops *ops;
 	int ret;
+
+	dev_info(dev, "Probing Deserializer\n");
+
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -1095,6 +1180,10 @@ static int max9296a_probe(struct i2c_client *client)
 	priv->regmap = devm_regmap_init_i2c(client, &i2c_regmap);
 	if (IS_ERR(priv->regmap))
 		return PTR_ERR(priv->regmap);
+
+	ret = max9296a_set_i2c_config(priv);
+	if (ret)
+		return ret;
 
 	priv->gpiod_pwdn = devm_gpiod_get_optional(&client->dev, "powerdown",
 						   GPIOD_OUT_HIGH);
@@ -1133,7 +1222,13 @@ static int max9296a_probe(struct i2c_client *client)
 	if (ret)
 		return ret;
 
-	return max_des_probe(client, &priv->des);
+	ret = max_des_probe(client, &priv->des);
+	if (ret)
+		return ret;
+
+	max9296a_get_i2c_config(priv);
+
+	return 0;
 }
 
 static void max9296a_remove(struct i2c_client *client)
