@@ -73,6 +73,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	gc9a01.dtbo \
 	ghost-amp.dtbo \
 	gmsl.dtbo \
+	gmsl-genx320.dtbo \
 	goodix.dtbo \
 	googlevoicehat-soundcard.dtbo \
 	gpio-charger.dtbo \
