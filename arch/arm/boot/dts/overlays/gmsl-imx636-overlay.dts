@@ -8,7 +8,7 @@
         target = <&i2c_csi_dsi1>;
         __overlay__ {
             status = "okay";
-            clock-frequency = <100000>;
+            clock-frequency = <400000>;
 
             max_des_0: gmsl-deserializer@2a {
                 compatible = "maxim,max96716a";
@@ -86,7 +86,7 @@
                 #size-cells = <0>;
                 #gpio-cells = <2>;
                 #clock-cells = <0>;
-                clock-frequency = <100000>;
+                clock-frequency = <400000>;
 
                 gpio-controller;
                 gpio-ranges = <&max_des_0_ser_0 0 0 11>;
